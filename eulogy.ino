@@ -109,15 +109,21 @@ void setup() {
 }
 
 
+bool pingpong = true;
 void loop()
 {
-	while (!mpuInterrupt && fifoCount < packetSize) {
+ 
+	while (fifoCount < packetSize && pingpong) {
+    pingpong = false;
+    
 		const int notes[] = { nC4, nD4, nE4, nF4, nG4, nA4, nB4, nC5 };
 		Serial.println("Estou no while!");
 		for (int i = 0; i < 1; i++) {
 			//Serial.println(notes[i]);
 			//Tone(notes[i]);
-      Tone((ypr[0] + 180 + nB0) * 30);
+      int frequency = (ypr[0] + 180);
+      Serial.println(frequency);
+      Tone(frequency);
 			//delay(1000);
 			//Decay(500);
 			//NoTone();
@@ -127,6 +133,7 @@ void loop()
 			//Decay();
 		}
 	}
+	pingpong = true;
 
 	// reset interrupt flag and get INT_STATUS byte
 	mpuInterrupt = false;
