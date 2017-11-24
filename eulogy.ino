@@ -1,41 +1,35 @@
+#include <avr/interrupt.h>
+
+#include "Wire.h"
 #include "I2Cdev.h"
-//#include "MPU6050.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 
-#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
-#include "Wire.h"
-#endif
 #define INTERRUPT_PIN 2
 
 // MPU control/status vars
-bool dmpReady = false;  // set true if DMP init was successful
-uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
-uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
+uint8_t  mpuIntStatus;   // holds actual interrupt status byte from MPU
 uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
 uint16_t fifoCount;     // count of all bytes currently in FIFO
-uint8_t fifoBuffer[64]; // FIFO storage buffer
+uint8_t  fifoBuffer[64]; // FIFO storage buffer
 
 #include "pitches.h"
 
-/******** Load AVR timer interrupt macros ********/
-#include <avr/interrupt.h>
-
-/******** Sine wave parameters ********/
+/* Sine wave parameters */
 #define PI2     6.283185 // 2 * PI - saves calculating it later
 #define AMP     127      // Multiplication factor for the sine wave
 #define OFFSET  128      // Offset shifts wave to just positive values
 
-/******** Lookup table ********/
+/* Waveform lookup table */
 #define LENGTH  256  // The length of the waveform lookup table
-byte wave[LENGTH];   // Storage for the waveform
+byte wave[LENGTH];
 
 /* Note stuff */
 int gDecayTime = 200;
 float gVolume = 1.0;
 
-
+/* MPU related variables */
 MPU6050 mpu;
-int gOffsetX, gOffsetY, gOffsetZ;
+float ypr[3];
 
 // ================================================================
 // ===               INTERRUPT DETECTION ROUTINE                ===
@@ -46,13 +40,10 @@ void dmpDataReady() {
 	mpuInterrupt = true;
 }
 
-void setup() {
-	// Setup MPU6050
+void SetupMPU () {
 	Wire.begin();
 	Wire.setClock(400000);
 
-	Serial.begin(9600);
-	Serial.println("Initializing I2C devices...");
 	mpu.initialize();
 
 	pinMode(INTERRUPT_PIN, INPUT);
@@ -62,7 +53,7 @@ void setup() {
 	else
 		Serial.println("MPU6050 connection failed");
 
-	devStatus = mpu.dmpInitialize();
+	int devStatus = mpu.dmpInitialize();
 
 	if (devStatus == 0) {
 		// turn on the DMP, now that it's ready
@@ -75,7 +66,6 @@ void setup() {
 
 		// set our DMP Ready flag so the main loop() function knows it's okay to use it
 		Serial.println(F("DMP ready! Waiting for first interrupt..."));
-		dmpReady = true;
 
 		// get expected DMP packet size for later comparison
 		packetSize = mpu.dmpGetFIFOPacketSize();
@@ -85,6 +75,9 @@ void setup() {
 		Serial.println(F(")"));
 	}
 
+}
+
+void SetupSynth () {
 	/******** Populate the waveform lookup table with a sine wave ********/
 	for (int i = 0; i < LENGTH; i++) {
 		float v = (AMP * sin((PI2 / LENGTH) * i)); // Calculate current entry
@@ -106,23 +99,29 @@ void setup() {
 	sei();                    // Enable interrupts to generate waveform!
 }
 
-#define OUTPUT_READABLE_ACCELGYRO
-float ypr[3];
-Quaternion q;
-VectorFloat gravity;
+void setup() {
+	Serial.begin(9600);
+
+	SetupMPU();
+	SetupSynth();
+
+  NoTone();
+}
+
+
 void loop()
 {
 	while (!mpuInterrupt && fifoCount < packetSize) {
 		const int notes[] = { nC4, nD4, nE4, nF4, nG4, nA4, nB4, nC5 };
-
-		for (int i = 0; i < 8; i++) {
-			delay(500);
+		Serial.println("Estou no while!");
+		for (int i = 0; i < 1; i++) {
 			//Serial.println(notes[i]);
 			//Tone(notes[i]);
+      Tone((ypr[0] + 180 + nB0) * 30);
 			//delay(1000);
 			//Decay(500);
 			//NoTone();
-			//delay(200);
+			//delay(500);
 
 			//Serial.println("Decay time!");
 			//Decay();
@@ -138,14 +137,13 @@ void loop()
 
 	// check for overflow (this should never happen unless our code is too inefficient)
 	if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
-		// reset so we can continue cleanly
 		mpu.resetFIFO();
 		Serial.println(F("FIFO overflow!"));
-
 		// otherwise, check for DMP data ready interrupt (this should happen frequently)
 	} else if (mpuIntStatus & 0x02) {
 		// wait for correct available data length, should be a VERY short wait
-		while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+		while (fifoCount < packetSize)
+			fifoCount = mpu.getFIFOCount();
 
 		// read a packet from FIFO
 		mpu.getFIFOBytes(fifoBuffer, packetSize);
@@ -154,18 +152,22 @@ void loop()
 		// (this lets us immediately read more without waiting for an interrupt)
 		fifoCount -= packetSize;
 
-		// display Euler angles in degrees
-		mpu.dmpGetQuaternion(&q, fifoBuffer);
-		mpu.dmpGetGravity(&gravity, &q);
-		mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
 
-		Serial.print("ypr\t");
-		Serial.print(ypr[0] * 180/M_PI);
-		Serial.print("\t");
-		Serial.print(ypr[1] * 180/M_PI);
-		Serial.print("\t");
-		Serial.println(ypr[2] * 180/M_PI);
+		Quaternion  quaternion;
+		VectorFloat gravity;
+		// display Euler angles in degrees
+		mpu.dmpGetQuaternion(&quaternion, fifoBuffer);
+		mpu.dmpGetGravity(&gravity, &quaternion);
+		mpu.dmpGetYawPitchRoll(ypr, &quaternion, &gravity);
+
+//		Serial.print("ypr\t");
+//		Serial.print(ypr[0] * 180 / M_PI);
+//		Serial.print("\t");
+//		Serial.print(ypr[1] * 180 / M_PI);
+//		Serial.print("\t");
+		Serial.println(ypr[2] * 180 / M_PI);
 	}
+ mpuInterrupt = false;
 }
 
 void Tone (int frequency) {
@@ -177,7 +179,6 @@ void NoTone () {
 	gVolume = 0.0f;
 }
 
-
 /******** Called every time TCNT2 = OCR2A ********/
 ISR(TIMER2_COMPA_vect) {  // Called each time TCNT2 == OCR2A
 	static byte index = 0;  // Points to successive entries in the wavetable
@@ -185,19 +186,6 @@ ISR(TIMER2_COMPA_vect) {  // Called each time TCNT2 == OCR2A
 	//  OCR1AL = wave[index++]; // Update the PWM output
 	asm("NOP;NOP");         // Fine tuning
 	TCNT2 = 6;              // Timing to compensate for time spent in ISR
-}
-
-void DecayUpdate() {
-	static int timeDecayStarted = 0;
-	int timeSinceDecayStarted = millis() - timeDecayStarted;
-
-	int dx = gDecayTime - timeSinceDecayStarted;
-	if (dx < 0) {
-		timeDecayStarted = millis();
-		dx = 0;
-	}
-
-	gVolume = (float)dx / (float)gDecayTime;
 }
 
 void Decay (int decayTime) {
