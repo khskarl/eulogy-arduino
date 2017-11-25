@@ -1,35 +1,82 @@
-#include <avr/interrupt.h>
-
 #include "Wire.h"
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 
-#define INTERRUPT_PIN 2
+#define INTERRUPT_PIN 19
 
 // MPU control/status vars
 uint8_t  mpuIntStatus;   // holds actual interrupt status byte from MPU
 uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
 uint16_t fifoCount;     // count of all bytes currently in FIFO
 uint8_t  fifoBuffer[64]; // FIFO storage buffer
+/* MPU related variables */
+MPU6050 mpu;
+float ypr[3];
+
+
+#define LCD_CS    A3 // Chip Select goes to Analog 3
+#define LCD_CD    A2 // Command/Data goes to Analog 2
+#define LCD_WR    A1 // LCD Write goes to Analog 1
+#define LCD_RD    A0 // LCD Read goes to Analog 0
+#define LCD_RESET A4 // Can alternately just connect to Arduino's reset pin
+
+#include <SPI.h>          // f.k. for Arduino-1.5.2
+#include "Adafruit_GFX.h"// Hardware-specific library
+#include <MCUFRIEND_kbv.h>
+MCUFRIEND_kbv tft;
+#include <Adafruit_TFTLCD.h>
+
+// Assign human-readable names to some common 16-bit color values:
+#define  BLACK   0x0000
+#define BLUE    0x001F
+#define RED     0xF800
+#define GREEN   0x07E0
+#define CYAN    0x07FF
+#define MAGENTA 0xF81F
+#define YELLOW  0xFFE0
+#define WHITE   0xFFFF
+
+#ifndef min
+#define min(a, b) (((a) < (b)) ? (a) : (b))
+#endif
+
+
+#include "TouchScreen.h"
+
+uint8_t YP = A1;  // must be an analog pin, use "An" notation!
+uint8_t XM = A2;  // must be an analog pin, use "An" notation!
+uint8_t YM = 7;   // can be a digital pin
+uint8_t XP = 6;   // can be a digital pin
+
+uint16_t TS_LEFT = 160;
+uint16_t TS_RT  = 925;
+uint16_t TS_TOP = 160;
+uint16_t TS_BOT = 955;
+
+
+// YMax = 955
+// YMin = 160
+// XMax = 925
+// XMin = 160
+
+// For better pressure precision, we need to know the resistance
+// between X+ and X- Use any multimeter to read it
+// For the one we're using, its 300 ohms across the X plate
+TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
+
+
 
 #include "pitches.h"
 
 /* Sine wave parameters */
 #define PI2     6.283185 // 2 * PI - saves calculating it later
-#define AMP     127      // Multiplication factor for the sine wave
+#define AMP     120      // Multiplication factor for the sine wave
 #define OFFSET  128      // Offset shifts wave to just positive values
 
 /* Waveform lookup table */
 #define LENGTH  256  // The length of the waveform lookup table
 byte wave[LENGTH];
 
-/* Note stuff */
-int gDecayTime = 200;
-float gVolume = 1.0;
-
-/* MPU related variables */
-MPU6050 mpu;
-float ypr[3];
 
 // ================================================================
 // ===               INTERRUPT DETECTION ROUTINE                ===
@@ -44,7 +91,7 @@ void dmpDataReady() {
 
 void SetupMPU () {
 	Wire.begin();
-	Wire.setClock(400000 * 8);
+	Wire.setClock(400000);
 
 	mpu.initialize();
 
@@ -85,57 +132,92 @@ void SetupSynth () {
 		float v = (AMP * sin((PI2 / LENGTH) * i)); // Calculate current entry
 		wave[i] = int(v + OFFSET);            // Store value as integer
 	}
-
-	/******** Set timer1 for 8-bit fast PWM output ********/
-	pinMode(9, OUTPUT);       // Make timer's PWM pin an output
-	TCCR1B  = (1 << CS10);    // Set prescaler to full 16MHz
-	TCCR1A |= (1 << COM1A1);  // PWM pin to go low when TCNT1=OCR1A
-	TCCR1A |= (1 << WGM10);   // Put timer into 8-bit fast PWM mode
-	TCCR1B |= (1 << WGM12);
-
-	/******** Set up timer 2 to call ISR ********/
-	TCCR2A = 0;               // We need no options in control register A
-	TCCR2B = (1 << CS21);     // Set prescaller to divide by 8
-	TIMSK2 = (1 << OCIE2A);   // Set timer to call ISR when TCNT2 = OCRA2
-	OCR2A = 32;               // sets the frequency of the generated wave
-	sei();                    // Enable interrupts to generate waveform!
+//  for (int i = 0; i < LENGTH; i++) {
+//    if (i < LENGTH / 2)
+//      wave[i] = tft.height();
+//    else 
+//      wave[i] = 0;
+//  }
 }
 
 void setup() {
 	Serial.begin(9600);
+  Serial2.begin(9600);
 
 	SetupMPU();
-	SetupSynth();
+  
+  tft.reset();
 
-  NoTone();
+  Serial.print("TFT size is ");
+  Serial.print(tft.width());
+  Serial.print("x");
+  Serial.println(tft.height());
+  
+  uint16_t id = tft.readID();
+  Serial.print("ID = 0x");
+  Serial.println(id, HEX);
+  id = 0x4532;
+  tft.begin(id);
+    
+  tft.fillScreen(BLACK);
+  tft.setRotation(1);
+  tft.setTextColor(RED);
+  tft.setCursor(0, 0);
+  tft.print(".-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.\n");
+  tft.setCursor(0, 0);
+
+
+  SetupSynth();
+  
+  for (int i = 0; i < LENGTH; i++) {
+//    tft.drawPixel(i, tft.height() / 2 + wave[i] - 127, MAGENTA);  
+    tft.drawFastVLine(i, tft.height() / 2 + wave[i] - 127, 8, RED);
+  }
 }
 
-
-bool pingpong = true;
 void loop()
 {
- 
-	while (fifoCount < packetSize && !mpuInterrupt) {
-    pingpong = false;
-    
-		const int notes[] = { nC4, nD4, nE4, nF4, nG4, nA4, nB4, nC5 };
-		Serial.println("Estou no while!");
-		for (int i = 0; i < 1; i++) {
-			//Serial.println(notes[i]);
-			//Tone(notes[i]);
-      int frequency = (ypr[0] + 180) * 20;
-      Serial.println(frequency);
-      Tone(frequency);
-			//delay(1000);
-			//Decay(500);
-			//NoTone();
-			//delay(500);
 
-			//Serial.println("Decay time!");
-			//Decay();
-		}
-	}
-	pingpong = true;
+  TSPoint tp = ts.getPoint();
+  
+  pinMode(XM, OUTPUT);
+  pinMode(YP, OUTPUT);
+  pinMode(XP, OUTPUT);
+  pinMode(YM, OUTPUT);
+  
+  int ypos = map(tp.x, TS_LEFT, TS_RT, 0, tft.height());
+  int xpos = map(tp.y, TS_TOP, TS_BOT, 0, tft.width() + 20);
+  
+  // we have some minimum pressure we consider 'valid'
+  // pressure of 0 means no pressing!
+  if (tp.z > 50) {
+    if (xpos > tft.width()) {
+      
+    }
+    else if (xpos >= LENGTH && xpos <= tft.width()) {
+    }
+    else if (xpos > 0 && xpos < LENGTH) {
+      Serial.print("X = ");   Serial.print(xpos);
+      Serial.print("\tY = "); Serial.println(ypos);
+
+      tft.drawFastVLine(xpos, wave[xpos] - 9, 20, BLACK);
+      int h = tft.height() - ypos;
+      tft.drawFastVLine(xpos, h, 9, RED); 
+      wave[xpos] = h;
+      
+      byte w[2] = {xpos, h};
+      Serial2.write(w, 2);
+      
+    }
+  }
+
+  
+  
+  float angle = ypr[2] * 180 / M_PI;
+	//Serial.println(angle);
+  
+  
+  ////////////////////////////////////////////////////////
 
 	// reset interrupt flag and get INT_STATUS byte
 	mpuInterrupt = false;
@@ -143,10 +225,6 @@ void loop()
 
 	// get current FIFO count
 	fifoCount = mpu.getFIFOCount();
-  Serial.print("fifocount: ");
-  Serial.print(fifoCount);
-  Serial.print("       Data ready: ");
-  Serial.println(dataReadyCalled);
   dataReadyCalled = 0;
 
 	// check for overflow (this should never happen unless our code is too inefficient)
@@ -180,37 +258,6 @@ void loop()
 //		Serial.print("\t");
 //		Serial.println(ypr[2] * 180 / M_PI);
 	}
- mpuInterrupt = false;
 }
 
-void Tone (int frequency) {
-	gVolume = 1.0;
-	OCR2A = 2000000 / ((frequency + 0.001) * LENGTH);
-}
 
-void NoTone () {
-	gVolume = 0.0f;
-}
-
-/******** Called every time TCNT2 = OCR2A ********/
-ISR(TIMER2_COMPA_vect) {  // Called each time TCNT2 == OCR2A
-	static byte index = 0;  // Points to successive entries in the wavetable
-	OCR1AL = (int)(wave[index++] * gVolume); // Update the PWM output
-	//  OCR1AL = wave[index++]; // Update the PWM output
-	asm("NOP;NOP");         // Fine tuning
-	TCNT2 = 6;              // Timing to compensate for time spent in ISR
-}
-
-void Decay (int decayTime) {
-	int timeDecayStarted = millis();
-	int timeSinceDecayStarted = millis() - timeDecayStarted;
-	int dx = decayTime - timeSinceDecayStarted;
-
-	while (dx > 0) {
-		gVolume = (float)dx / (float)decayTime;
-
-		timeSinceDecayStarted = millis() - timeDecayStarted;
-		dx = decayTime - timeSinceDecayStarted;
-	}
-	gVolume = 0;
-}
