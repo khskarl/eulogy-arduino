@@ -36,13 +36,15 @@ float ypr[3];
 // ================================================================
 
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
+int dataReadyCalled = 0;
 void dmpDataReady() {
 	mpuInterrupt = true;
+  dataReadyCalled += 1;
 }
 
 void SetupMPU () {
 	Wire.begin();
-	Wire.setClock(400000);
+	Wire.setClock(400000 * 8);
 
 	mpu.initialize();
 
@@ -113,7 +115,7 @@ bool pingpong = true;
 void loop()
 {
  
-	while (fifoCount < packetSize && pingpong) {
+	while (fifoCount < packetSize && !mpuInterrupt) {
     pingpong = false;
     
 		const int notes[] = { nC4, nD4, nE4, nF4, nG4, nA4, nB4, nC5 };
@@ -121,7 +123,7 @@ void loop()
 		for (int i = 0; i < 1; i++) {
 			//Serial.println(notes[i]);
 			//Tone(notes[i]);
-      int frequency = (ypr[0] + 180);
+      int frequency = (ypr[0] + 180) * 20;
       Serial.println(frequency);
       Tone(frequency);
 			//delay(1000);
@@ -141,6 +143,11 @@ void loop()
 
 	// get current FIFO count
 	fifoCount = mpu.getFIFOCount();
+  Serial.print("fifocount: ");
+  Serial.print(fifoCount);
+  Serial.print("       Data ready: ");
+  Serial.println(dataReadyCalled);
+  dataReadyCalled = 0;
 
 	// check for overflow (this should never happen unless our code is too inefficient)
 	if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
@@ -159,7 +166,6 @@ void loop()
 		// (this lets us immediately read more without waiting for an interrupt)
 		fifoCount -= packetSize;
 
-
 		Quaternion  quaternion;
 		VectorFloat gravity;
 		// display Euler angles in degrees
@@ -172,7 +178,7 @@ void loop()
 //		Serial.print("\t");
 //		Serial.print(ypr[1] * 180 / M_PI);
 //		Serial.print("\t");
-		Serial.println(ypr[2] * 180 / M_PI);
+//		Serial.println(ypr[2] * 180 / M_PI);
 	}
  mpuInterrupt = false;
 }
