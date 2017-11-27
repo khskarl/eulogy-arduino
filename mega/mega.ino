@@ -180,17 +180,17 @@ void loop()
 
   TSPoint tp = ts.getPoint();
   
-  pinMode(XM, OUTPUT);
-  pinMode(YP, OUTPUT);
-  pinMode(XP, OUTPUT);
-  pinMode(YM, OUTPUT);
-  
-  int ypos = map(tp.x, TS_LEFT, TS_RT, 0, tft.height());
-  int xpos = map(tp.y, TS_TOP, TS_BOT, 0, tft.width() + 20);
-  
   // we have some minimum pressure we consider 'valid'
   // pressure of 0 means no pressing!
   if (tp.z > 50) {
+    pinMode(XM, OUTPUT);
+    pinMode(YP, OUTPUT);
+    pinMode(XP, OUTPUT);
+    pinMode(YM, OUTPUT);
+    
+    int ypos = map(tp.x, TS_LEFT, TS_RT, 0, tft.height());
+    int xpos = map(tp.y, TS_TOP, TS_BOT, 0, tft.width() + 20);
+    
     if (xpos > tft.width()) {
       
     }
@@ -206,9 +206,18 @@ void loop()
       wave[xpos] = h;
       
       byte w[2] = {xpos, h};
-      Serial2.write(w, 2);
-      
+      Serial2.write(w, 2);      
     }
+  }
+  else {
+    if (Serial2.available() > 0) {
+      byte ack = 0x0;
+      ack = Serial2.read();
+      if (ack == 0xFF) {
+        Serial2.write(wave, LENGTH);
+      }
+    }
+     
   }
 
   

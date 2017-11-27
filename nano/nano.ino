@@ -12,7 +12,6 @@
 byte wave[LENGTH];
 
 /* Note stuff */
-int gDecayTime = 200;
 float gVolume = 1.0;
 
 void SetupSynth () {
@@ -21,6 +20,12 @@ void SetupSynth () {
 		float v = (AMP * sin((PI2 / LENGTH) * i)); // Calculate current entry
 		wave[i] = int(v + OFFSET);            // Store value as integer
 	}
+  
+  Serial.write(0xFF); 
+  if (Serial.available() > 0) {
+    byte ack;
+    Serial.readBytes(wave, LENGTH);
+  }
 
 	/******** Set timer1 for 8-bit fast PWM output ********/
 	pinMode(9, OUTPUT);       // Make timer's PWM pin an output
@@ -45,24 +50,67 @@ void setup() {
   NoTone();
 }
 
+int gMelody[] = {
+  G3, AS3, D4, G4, G4, F4, D4,
+  G3, AS3, D4, G4, G4, F4, D4,
+  G3, AS3, D4, G4, G4, F4, D4,
+  G3, AS3, D4, G4, G4, F4, D4,
 
-bool pingpong = true;
+  G3, A3, AS3, D4,
+  0,  D4, E4,  F4, D4, E4, C4, D4,
+  A3,
+
+  0,
+  G3, A3, AS3, D4,
+  0,  D4, E4,  F4, D4, E4, C4, D4,
+  A3,
+
+  
+};
+
+int gNoteDurations[] = {
+  8, 8, 8, 4, 8, 8, 8,
+  8, 8, 8, 4, 8, 8, 8,
+  8, 8, 8, 4, 8, 8, 8,
+  8, 8, 8, 4, 4, 4, 4,
+
+  8, 8, 8, 2, 
+  8, 8, 8, 8, 8, 8, 8, 8,
+  1,
+
+  1,
+  8, 8, 8, 2, 
+  8, 8, 8, 8, 8, 8, 8, 8,
+  1,
+  
+};
+
+int gCurrNote = 0;
+
 void loop()
 {
-  const int notes[] = { nC4, nD4, nE4, nF4, nG4, nA4, nB4, nC5 };
+//  const int notes[] = { nC4, nD4, nE4, nF4, nG4, nA4, nB4, nC5 };
 
-  for (int i = 0; i < 1; i++) {
-  	//Serial.println(notes[i]);
-  	Tone(notes[i]);
-  	//delay(1000);
-  	Decay(500);
-  	//NoTone();
-  	//delay(500);
-  
-  	//Serial.println("Decay time!");
-  	//Decay();
+  int noteDuration = 1000 / gNoteDurations[gCurrNote];
+  int pauseBetweenNotes = noteDuration * 1.50;
+//  delay(pauseBetweenNotes);  
+  int note = gMelody[gCurrNote];
+  if (note != 0) {
+    Tone(note);
+    delay(noteDuration);
+    Decay(300, pauseBetweenNotes);
   }
-
+  else { 
+    NoTone();
+    delay(noteDuration + pauseBetweenNotes);
+  }
+  delay(100);
+  gCurrNote += 1;
+  if (gCurrNote == 55) {
+    gCurrNote = 0;
+    delay(1000);
+  }
+  
   while (Serial.available() > 0) {
     byte w[2];
     Serial.readBytes(w, 2);
@@ -76,11 +124,11 @@ void loop()
 
 void Tone (int frequency) {
 	gVolume = 1.0;
-	OCR2A = 2000000 / ((frequency + 0.001) * LENGTH);
+	OCR2A = 2000000 / ((frequency + 0.1) * LENGTH);
 }
 
 void NoTone () {
-	gVolume = 0.0f;
+	gVolume = 0.1f;
 }
 
 /******** Called every time TCNT2 = OCR2A ********/
@@ -92,12 +140,12 @@ ISR(TIMER2_COMPA_vect) {  // Called each time TCNT2 == OCR2A
 	TCNT2 = 6;              // Timing to compensate for time spent in ISR
 }
 
-void Decay (int decayTime) {
+void Decay (int decayTime, int threshould) {
 	int timeDecayStarted = millis();
 	int timeSinceDecayStarted = millis() - timeDecayStarted;
 	int dx = decayTime - timeSinceDecayStarted;
 
-	while (dx > 0) {
+	while (dx > 0 && timeSinceDecayStarted <= threshould) {
 		gVolume = (float)dx / (float)decayTime;
 
 		timeSinceDecayStarted = millis() - timeDecayStarted;
